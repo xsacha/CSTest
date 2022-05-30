@@ -1,0 +1,12 @@
+if(DEFINED IMAGUS_FLAGS_VS_MD_CMAKE_)
+  return()
+else()
+  set(IMAGUS_FLAGS_VS_MD_CMAKE_ 1)
+endif()
+
+foreach(_lang C CXX)
+  set(CMAKE_${_lang}_FLAGS_DEBUG "/D_DEBUG /MDd /Zi /Ob0 /Od /RTC1 /FS /EHsc" CACHE STRING "" FORCE)
+  set(CMAKE_${_lang}_FLAGS_MINSIZEREL "/MD /O1 /Ob1 /DNDEBUG /FS /EHsc" CACHE STRING "" FORCE)
+  set(CMAKE_${_lang}_FLAGS_RELEASE "/MD /Zi /O2 /Ob2 /DNDEBUG /FS /EHsc" CACHE STRING "" FORCE)
+  set(CMAKE_${_lang}_FLAGS_RELWITHDEBINFO "/MD /Zi /O2 /Ob1 /DNDEBUG /FS /EHsc" CACHE STRING "" FORCE)
+endforeach()

@@ -1,0 +1,10 @@
+if(DEFINED IMAGUS_VS_WIN64_CUDA_CMAKE_)
+  return()
+else()
+  set(IMAGUS_VS_WIN64_CUDA_CMAKE_ 1)
+endif()
+
+get_filename_component(HUNTER_INSTALL_TAG "${CMAKE_CURRENT_LIST_FILE}" NAME_WE)
+include("${CMAKE_CURRENT_LIST_DIR}/flags/vs.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/flags/AVX2.cmake")
+set(HUNTER_CONFIGURATION_TYPES "Release")
