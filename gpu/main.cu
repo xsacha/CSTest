@@ -4,6 +4,7 @@
 #include <cuda.h>
 
 #include "cudaHelper.h"
+#include "formula.h"
 
 int main()
 {
@@ -28,10 +29,27 @@ int main()
 
 	constexpr unsigned TIMESTEPS = 200;
 
-
-
-    // Perform explicit
+    // Use Formula (not parallel)
     {
+        double* resultGPU;
+        checkCudaErrors(cudaMalloc((void**)&resultGPU, sizeof(double)));
+        cudaEventRecord(start);
+        UseFormula<<<1,1>>>(resultGPU, T, S0, r, K, sigma);
+        double result;
+        checkCudaErrors(cudaMemcpy(&result, resultGPU, sizeof(double), cudaMemcpyDeviceToHost));
+
+        cudaEventRecord(stop);
+		cudaEventSynchronize(stop);
+		float millisecondsElapsed;
+		cudaEventElapsedTime(&millisecondsElapsed, start, stop);
+
+        printf("Using Black-Scholes formula, result is: %lf\n", result);
+        printf("Consumed %f ms\n", millisecondsElapsed);
+    }
+
+    // Perform explicit time-marching
+    {
+        // Parallel only by requiring multiple calculations
         printf("Explicit, single-precision\n");
     }
 
