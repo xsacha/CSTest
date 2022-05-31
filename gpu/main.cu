@@ -53,10 +53,10 @@ int main()
         printf("Explicit, single-precision\n");
         num_dissteps = 1024;
         num_blocks = 1;
-        num_threads = TIMESTEPS - 1;
+        num_threads = num_dissteps;
 
-        // Parallel only by requiring multiple calculations
-        int memsize = num_dissteps * sizeof(double);
+        // Not parallel in time
+        int memsize = (num_dissteps + 1) * sizeof(double);
 		double* d_x;
 		checkCudaErrors(cudaMalloc((void**)&d_x, memsize));
 
@@ -74,6 +74,9 @@ int main()
         double ds = Smax / (num_dissteps + 1);
         printf("Using Explicit method when spot price is %lf: %lf\n", S0, getPrice(S0, ds, x));
         printf("Consumed %f ms\n", millisecondsElapsed);
+
+        cudaFree(d_x);
+        free(x);
     }
 
     // Perform implicit
@@ -89,10 +92,39 @@ int main()
 		checkCudaErrors(cudaMalloc((void**)&d_upperbound, (TIMESTEPS + 1) * sizeof(float)));
 		for (int i = 0; i <= TIMESTEPS; i++)
 		{
-            //vanilla European call option
+            // Vanilla European call option
 			upperbound[i] = (float)((Smax - K) * exp(-r * T / TIMESTEPS * i));
 		}
 		checkCudaErrors(cudaMemcpy(d_upperbound, upperbound, (TIMESTEPS + 1) * sizeof(float), cudaMemcpyHostToDevice));
+
+        // Allocate memory space for global array of solutions
+		int memsize = num_options * num_dissteps * sizeof(float);
+		float* d_x;
+		checkCudaErrors(cudaMalloc((void**)&d_x, memsize));
+
+		cudaEventRecord(start);
+		num_threads = 256;
+		num_blocks = num_options / 8;
+        // perform the main time-marching of finite difference method, implicit scheme
+
+		ImplicitMethod <<<num_blocks, num_threads>>>((float)sigma, (float)Smax, (float)K, (float)T, (float)r, d_x, d_upperbound);
+		// copy results from device to host
+		float* x = (float*)malloc(memsize);
+		checkCudaErrors(cudaMemcpy(x, d_x, memsize, cudaMemcpyDeviceToHost));
+		cudaEventRecord(stop);
+		cudaEventSynchronize(stop);
+		float millisecondsElapsed;
+		cudaEventElapsedTime(&millisecondsElapsed, start, stop);
+
+		// Get the price by interpolation method
+		float ds = (float)Smax / (num_dissteps + 1);
+		printf("Price of test when spot price is %lf: %f\n", S0, getPrice((float)S0, ds, x));
+		printf("Consumed %f ms\n", millisecondsElapsed / num_options);
+		// cleanup memory
+		checkCudaErrors(cudaFree(d_x));
+		checkCudaErrors(cudaFree(d_upperbound));
+		free(x);
+		free(upperbound);
     }
 
     // Perform Crank Nicolson
