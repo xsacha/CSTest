@@ -1,15 +1,8 @@
 // TODO: A reference CPU implementation
 // Using Black-Scholes PDE
-// dC/dt + 0.5s^2+S^2(d^2C/dS^2) + rS(dC/dS) - rC = 0
-// Initial condition: C(S, T) = max(St - K, 0)
-// boundary condition: C(0, t) = 0; C(S, t) tends to S as S to infinity
-// C(S, t) is defined over 0 < S < infinity and 0 <= t <= T
-// but we will use an Smax for finite differences
-// we price for t = 0 assuming exercise at T (European)
-// We arrive at:
-// du/dr = d^2u/dx^2 + (k - 1)(du/dx) - ku
 
 #include <chrono>
+#include "CallExample.h"
 
 using namespace std::chrono;
 struct auto_timer
@@ -44,3 +37,18 @@ struct auto_timer
 		printf("Consumed %d ms\n", format());
 	}
 };
+
+
+int main()
+{
+    // Set up some call option parameters
+	// Example: ASX:BOQ May 30th
+	// Actual BOQWW7: 0.19
+	double S0 = 7.7;
+	double sigma = 0.3;
+	double r = 0.04;
+	double T = 16.0 / 365;
+	double K = 7.51;
+	double s_min = 0.0, s_max = 50.0;
+
+}
