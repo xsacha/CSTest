@@ -51,9 +51,9 @@ int main()
     // Perform explicit time-marching
     {
         printf("Explicit, single-precision\n");
-        num_dissteps = 1024;
+        num_dissteps = 500;
         num_blocks = 1;
-        num_threads = num_dissteps;
+        num_threads = num_dissteps - 1;
 
         // Not parallel in time
         int memsize = (num_dissteps + 1) * sizeof(double);
@@ -61,7 +61,7 @@ int main()
 		checkCudaErrors(cudaMalloc((void**)&d_x, memsize));
 
         cudaEventRecord(start);
-        ExplicitMethod<<<num_blocks, num_threads>>>(sigma, Smax, K, T, r, d_x);
+        ExplicitMethod<<<num_blocks, num_threads>>>(sigma, Smax, K, T, r, d_x, TIMESTEPS, num_dissteps);
         double* x = (double*)malloc(memsize);
 		checkCudaErrors(cudaMemcpy(x, d_x, memsize, cudaMemcpyDeviceToHost));
 
@@ -131,7 +131,55 @@ int main()
 	{
 		printf("CrankNicolson, double-precision, discretise S in to 2050 slices, timesteps = 200\n");
         // Excludes end points Smin=0.0, Smax=50.0
-        num_dissteps = 2048;
+		num_dissteps = 2048; //excluding end points Smin=0.0, Smax=50.0
+        num_blocks = num_options;
+		num_threads = num_dissteps / 2;
+
+
+		// Compute the corresponding upper boundary. (we will treat Smin=0.0 in this case)
+		double* upperbound, * d_upperbound;
+		upperbound = (double*)malloc((TIMESTEPS + 1) * sizeof(double));
+		checkCudaErrors(cudaMalloc((void**)&d_upperbound, (TIMESTEPS + 1) * sizeof(double)));
+		for (int i = 0; i <= TIMESTEPS; i++)
+			upperbound[i] = (Smax - K) * exp(-r * T / TIMESTEPS * i);  //vanilla European call option	
+		checkCudaErrors(cudaMemcpy(d_upperbound, upperbound, (TIMESTEPS + 1) * sizeof(double), cudaMemcpyHostToDevice));
+        // allocate memory space for global arrays of coefficients
+		int memsize = num_options * num_dissteps * sizeof(double);
+		double* d_a1;
+		double* d_b1;
+		double* d_c1;
+		double* d_x;
+		checkCudaErrors(cudaMalloc((void**)&d_a1, memsize / 2));
+		checkCudaErrors(cudaMalloc((void**)&d_b1, memsize / 2));
+		checkCudaErrors(cudaMalloc((void**)&d_c1, memsize / 2));
+		checkCudaErrors(cudaMalloc((void**)&d_x, memsize));
+
+		cudaEventRecord(start);
+		CrankNicolsonMethod<<<num_blocks, num_threads, (num_dissteps + 1) * 5 * sizeof(float)>>>(sigma, Smax, K, T, r, d_a1, d_b1, d_c1, d_x, d_upperbound);
+
+		// copy results from device to host
+		double* x = (double*)malloc(memsize);
+		checkCudaErrors(cudaMemcpy(x, d_x, memsize, cudaMemcpyDeviceToHost));
+
+		cudaEventRecord(stop);
+		cudaEventSynchronize(stop);
+		float millisecondsElapsed;
+		cudaEventElapsedTime(&millisecondsElapsed, start, stop);
+
+		// Get the price by interpolation method                        
+		double ds = Smax / (num_dissteps + 1);
+
+		printf("Price of test when spot price is %lf: %lf\n", S0, getPrice(S0, ds, x));
+		printf("Consumed %f ms\n", millisecondsElapsed / num_options);
+
+		// cleanup memory
+		checkCudaErrors(cudaFree(d_a1));
+		checkCudaErrors(cudaFree(d_b1));
+		checkCudaErrors(cudaFree(d_c1));
+		checkCudaErrors(cudaFree(d_x));
+		checkCudaErrors(cudaFree(d_upperbound));
+		free(x);
+		free(upperbound);
     }
 
     return 0;

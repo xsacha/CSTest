@@ -6,11 +6,11 @@ A CPU reference is used to confirm I'm in the right direction and hone knowledge
 A toy example will be used (call option on a bank stock) to have a result to play with.
 
 ## Structure
-build.bat Windows helper to run CMake
-CMakeLists.txt
-toolchains Compiler optimisations via cmake
-cpu/ Reference CPU implementation
-gpu/ CUDA implementation
+* build.bat Windows helper to run CMake
+* CMakeLists.txt
+* toolchains Compiler optimisations via cmake
+* cpu/ Reference CPU implementation
+* gpu/ CUDA implementation
 
 ## Papers that help
 "GPU implementation of finite difference solvers"

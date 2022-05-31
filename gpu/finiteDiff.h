@@ -5,9 +5,9 @@
 
 // Explicit time marching method
 template <typename REAL>
-__global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, REAL* d_x)
+__global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, REAL* d_x, int imax, int jmax)
 {
-    // TODO: Maybe pass it in so no magic numbers? Same as num_options for this?
+    // TODO: Maybe pass it in so no magic numbers?
 	constexpr int steps = 1024;
 	// Set of warps
 	constexpr int subthreads = 32;
@@ -18,15 +18,14 @@ __global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, RE
     int curThread = t_id % subthreads;
     REAL dS = Smax / (steps + 1);
     // TODO: Also pass this in
-	constexpr unsigned TIMESTEPS = 200;
-	REAL dT = T / TIMESTEPS;
+	REAL dT = T / imax;
 
     __shared__ double V_[steps + 2];
 	__shared__ double V_minus[steps + 2];
 	V_[t_id + 1] = d_x[t_id + 1];
 	__syncthreads();
     // Main time marching (not parallel)
-    for (int i = TIMESTEPS; i > 0; --i)
+    for (int i = imax; i > 0; --i)
     {
         __syncthreads();
         // Payouts (0 for bottom)
@@ -34,7 +33,7 @@ __global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, RE
 	    {
 	    	V_minus[0] = 0.0;
             // steps is jmax for now
-	    	V_minus[steps - 1] = ((Smax - K) * exp(-r * dT * i));
+	    	V_minus[jmax] = ((Smax - K) * exp(-r * dT * i));
 	    }
         REAL S = (curThread * subsize + i + 1) * dS;
 		// Pull it out instead of calc twice
@@ -182,6 +181,47 @@ __global__  void CrankNicolsonMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL
 {
     int t_id = threadIdx.x;
 	int b_id = blockIdx.x;
+
+	// We set the odd (a1) and even (a2) coefficients separately as in the paper
+	extern __shared__ char shared[];
+
+	REAL* a2 = (REAL*)shared;
+	// Index is odd (1, 3, 5, ..., 2 * blocksize - 1)
+	REAL* b2 = (REAL*)&a2[blockDim.x + 1];
+	REAL* c2 = (REAL*)&b2[blockDim.x + 1];
+	REAL* d1 = (REAL*)&c2[blockDim.x + 1];
+	REAL* d2 = (REAL*)&d1[blockDim.x + 1];
+
+	// Remember: num_points = num_threads + 2 (end boundary points)
+	REAL dS = Smax / (2 * blockDim.x + 1);
+	// TODO: Probably pass it in
+	constexpr unsigned TIMESTEPS = 200;
+	REAL dT = T / TIMESTEPS;
+	// S from [1 * dS] -> [blockDim.x * dS] (exclude boundary point)
+	REAL S1 = (t_id * 2 + 1) * dS;
+	REAL S2 = (t_id * 2 + 2) * dS;
+	REAL alpha1 = 0.5 * dT * sigma * sigma * S1 * S1 / (dS * dS);
+	REAL alpha2 = 0.5 * dT * sigma * sigma * S2 * S2 / (dS * dS);
+	REAL beta1 = 0.5 * dT * r * S1 / dS;
+	REAL beta2 = 0.5 * dT * r * S2 / dS;
+	d_a1[t_id + b_id * blockDim.x] = -alpha1 + beta1;
+	d_b1[t_id + b_id * blockDim.x] = 1.0f + 2 * alpha1 + r * dT;
+	d_c1[t_id + b_id * blockDim.x] = -alpha1 - beta1;
+	// Initialise the pay out as the right hand side of equation (tridiagonal system)
+	// Vanilla European call option	
+	d1[t_id] = max(S1 - K, 0.0);
+	d2[t_id] = max(S2 - K, 0.0);
+
+
+	if (t_id == 0)
+	{
+		d_a1[b_id * blockDim.x] = 0.0;
+	}
+	__syncthreads();
+
+
+
+	// TODO: Main time-marching
 }
 
 // get the price at time 0
