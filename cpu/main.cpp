@@ -51,4 +51,6 @@ int main()
 	double K = 7.51;
 	double s_min = 0.0, s_max = 50.0;
 
+    CallExample option(T, r, K, sigma);
+	printf("Price: %lf\n", option.UseFormula(S0));
 }

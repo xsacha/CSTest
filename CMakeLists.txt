@@ -9,4 +9,5 @@ find_package(CUDAToolkit)
 set(CUDA_CUDA_FLAGS -fast-math)
 set(CMAKE_CUDA_ARCHITECTURES 75-real)
 
-add_executable(CSCPUTask cpu/main.cpp)
+add_executable(CSCPUTask cpu/main.cpp
+                         cpu/CallExample.cpp)
