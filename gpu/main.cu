@@ -51,7 +51,7 @@ int main()
     // Perform explicit time-marching
     {
         printf("Explicit, single-precision\n");
-        num_dissteps = 500;
+        num_dissteps = 1024;
         num_blocks = 1;
         num_threads = num_dissteps - 1;
 
@@ -72,7 +72,7 @@ int main()
 
         // Get price by interpolation method
         double ds = Smax / (num_dissteps + 1);
-        printf("Using Explicit method when spot price is %lf: %lf\n", S0, getPrice(S0, ds, x));
+        printf("Using Explicit method when spot price is %lf: %lf\n", S0, getPrice(S0, ds, x + 1));
         printf("Consumed %f ms\n", millisecondsElapsed);
 
         cudaFree(d_x);

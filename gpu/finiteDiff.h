@@ -25,6 +25,7 @@ __global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, RE
 	V_[t_id + 1] = d_x[t_id + 1];
 	__syncthreads();
     // Main time marching (not parallel)
+    REAL S = (t_id + 1) * dS;
     for (int i = imax; i > 0; --i)
     {
         __syncthreads();
@@ -35,7 +36,6 @@ __global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, RE
             // steps is jmax for now
 	    	V_minus[jmax] = ((Smax - K) * exp(-r * dT * i));
 	    }
-        REAL S = (curThread * subsize + i + 1) * dS;
 		// Pull it out instead of calc twice
 		REAL halfdT = (REAL)0.5 * dT;
 		REAL alpha = halfdT * sigma * sigma * S * S / (dS * dS);
@@ -43,6 +43,9 @@ __global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, RE
 		REAL a = -alpha + beta;
 		REAL b = 1.0f + 2 * alpha + r * dT;
 		REAL c = -alpha - beta;
+        //REAL a = dt*(b(i,j)*0.5-a(i,j)/ds)/ds;
+        //REAL b = 1.0-dt*c(i,j)+2.0*dt*a(i,j)/(ds*ds);
+        //REAL c = -dt*(b(i,j)*0.5+a(i,j)/ds)/ds;
         // d term is 0
         V_minus[t_id + 1] = a * V_[t_id] + b * V_[t_id + 1] + c*V_[t_id + 2];
         __syncthreads();
@@ -221,7 +224,153 @@ __global__  void CrankNicolsonMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL
 
 
 
-	// TODO: Main time-marching
+	// Main time-marching
+    constexpr int ITERATION = 100;
+	for (int k = 0; k < ITERATION; k++) {
+
+		a2[t_id] = -alpha2 + beta2;
+		b2[t_id] = 1.0f + 2 * alpha2 + r * dT;
+		c2[t_id] = -alpha2 - beta2;
+		if (t_id == blockDim.x - 1)
+		{
+			c2[t_id] = 0.0;
+		}
+
+		// Explicit and last row transformation 
+		int up = 0;
+        int down = 0;
+		if (t_id > 0)
+        {
+            up = t_id - 1;
+        }
+		if (t_id < blockDim.x - 1)
+        {
+            down = t_id + 1;
+        }
+		__syncthreads();
+
+		REAL d1_temp = -d_a1[t_id + b_id * blockDim.x] * d2[up] + (2 - d_b1[t_id + b_id * blockDim.x]) * d1[t_id] - d_c1[t_id + b_id * blockDim.x] * d2[t_id];
+		REAL d2_temp = -a2[t_id] * d1[t_id] + (2 - b2[t_id]) * d2[t_id] - c2[t_id] * d1[down];
+		__syncthreads();
+		d1[t_id] = d1_temp; d2[t_id] = d2_temp;
+		if (t_id == blockDim.x - 1) {
+			REAL cmax = -alpha2 - beta2;
+			d2[t_id] += -cmax * (d_upperbound[k + 1] + d_upperbound[k]);
+		}
+
+		__syncthreads();
+
+
+
+		// Part 1: Forward pass once (elimination by CR)
+
+		// Reduces it to half size of the system, and we update uneven (a2) functions
+		// d_a1[i]   * x[2i-1] + d_b1[i]   * x[2i]   + d_c1[i]   * x[2i+1] = d1[i]
+		// a2[i]     * x[2i]   + b2[i]     * x[2i+1] + c2[i]     * x[2i+2] = d2[i]
+		// d_a1[i+1] * x[2i+1] + d_b1[i+1] * x[2i+2] + d_c1[i+1] * x[2i+3] = d1[i+1]
+
+
+		REAL r_up = a2[t_id] / (d_b1[t_id + b_id * blockDim.x]);
+		REAL r_down = 0.0;
+		if (t_id == blockDim.x - 1)
+		{
+			b2[t_id] = b2[t_id] - d_c1[t_id + b_id * blockDim.x] * r_up;
+			d2[t_id] = d2[t_id] - d1[t_id] * r_up;
+			a2[t_id] = -d_a1[t_id + b_id * blockDim.x] * r_up;
+		}
+		else
+		{
+			r_down = c2[t_id] / (d_b1[t_id + 1 + b_id * blockDim.x]);
+			b2[t_id] = b2[t_id] - d_c1[t_id + b_id * blockDim.x] * r_up - d_a1[t_id + 1 + b_id * blockDim.x] * r_down;
+			d2[t_id] = d2[t_id] - d1[t_id] * r_up - d1[t_id + 1] * r_down;
+			a2[t_id] = -d_a1[t_id + b_id * blockDim.x] * r_up;
+			c2[t_id] = -d_c1[t_id + 1 + b_id * blockDim.x] * r_down;
+		}
+		__syncthreads();
+
+		// Part 2: Solve the half even-indexed system by PCR
+		int stride = 1;
+		int iteration = (int)log2(REAL(blockDim.x)) - 1;
+		
+        // Reduction
+		for (int i = 0; i < iteration; i++)
+		{
+
+			REAL r_up = 0.0; REAL r_down = 0.0;
+			int down = t_id + stride;
+			if (down >= blockDim.x)
+			{
+				down = blockDim.x - 1;
+			}
+			else
+			{
+                // down * r_down
+				r_down = c2[t_id] * __rcp(b2[down]);
+			}
+
+			int up = t_id - stride;
+			if (up < 0)
+			{
+				up = 0;
+			}
+			else
+			{
+                // up * r_down
+				r_up = a2[t_id] * __rcp(b2[up]);
+			}
+
+			__syncthreads();
+
+			REAL bNew = b2[t_id] - c2[up] * r_up - a2[down] * r_down;
+			REAL dNew = d2[t_id] - d2[up] * r_up - d2[down] * r_down;
+			REAL aNew = -a2[up] * r_up;
+			REAL cNew = -c2[down] * r_down;
+
+			__syncthreads();
+			a2[t_id] = aNew; b2[t_id] = bNew; c2[t_id] = cNew; d2[t_id] = dNew;
+			__syncthreads();
+			stride *= 2;
+
+		}
+		REAL x;
+        // This is blocksize / 2
+		if (t_id < stride)
+		{
+
+			int i = t_id;
+			int j = t_id + stride;
+			REAL tmp = b2[j] * b2[i] - c2[i] * a2[j];
+			x = (b2[j] * d2[i] - c2[i] * d2[j]) * __rcp(tmp);
+		}
+		if (t_id >= stride)
+		{
+
+			int i = t_id - stride;
+			int j = t_id;
+			REAL tmp = b2[j] * b2[i] - c2[i] * a2[j];
+			x = (d2[j] * b2[i] - d2[i] * a2[j]) * __rcp(tmp);
+		}
+
+		d2[t_id] = x;
+
+		__syncthreads();
+		// Part 3: Back substitution in CR
+
+		if (t_id == 0)
+		{
+			d1[t_id] = (d1[t_id] - d_c1[t_id + b_id * blockDim.x] * d2[t_id]) * __rcp(d_b1[t_id + b_id * blockDim.x]);
+		}
+		else
+		{
+			d1[t_id] = (d1[t_id] - d_a1[t_id + b_id * blockDim.x] * d2[t_id - 1] - d_c1[t_id + b_id * blockDim.x] * d2[t_id]) * __rcp(d_b1[t_id + b_id * blockDim.x]);
+		}
+		__syncthreads();
+
+	}
+
+    // Send results back
+	d_x[2 * t_id + b_id * 2 * blockDim.x] = d1[t_id];
+	d_x[2 * t_id + 1 + b_id * 2 * blockDim.x] = d2[t_id];
 }
 
 // get the price at time 0
