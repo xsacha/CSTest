@@ -10,4 +10,5 @@ set(CUDA_CUDA_FLAGS -fast-math)
 set(CMAKE_CUDA_ARCHITECTURES 75-real)
 
 add_executable(CSCPUTask cpu/main.cpp
+                         cpu/PDESolver.cpp
                          cpu/CallExample.cpp)

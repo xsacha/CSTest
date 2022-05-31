@@ -1,8 +1,8 @@
-// TODO: A reference CPU implementation
-// Using Black-Scholes PDE
-
 #include <chrono>
 #include "CallExample.h"
+#include "FiniteDiff.h"
+
+// Using Black-Scholes PDE
 
 using namespace std::chrono;
 struct auto_timer
@@ -56,7 +56,28 @@ int main()
 
 	auto p = BlackPDE(s_min, s_max, &option);
 
-	// TODO: Explicit, Implicit, Crank-Nicolson
+		FiniteDiff<3000, 300> expMethod(&p);
+	{
+		auto_timer t;
+		expMethod.ExplicitMethod();
+	}
+
+	printf("Explicit Method | Price = %lf\n", expMethod.getPrice(0.0, S0));
+
+	// We should slices/scales that would match a future CUDA version
+	FiniteDiff<200, 2048> impMethod(&p);
+	{
+		auto_timer t;
+		impMethod.ImplicitMethod();
+	}
+	printf("Implicit Method | Price = %lf\n", impMethod.getPrice(0.0, S0));
+
+	{
+		auto_timer t;
+		impMethod.CrankNicolsonMethod();
+	}
+
+	printf("Crank Nicolson Method | Price = %lf\n", impMethod.getPrice(0.0, S0));
 
 	return 0;
 }
