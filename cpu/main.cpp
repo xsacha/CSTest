@@ -41,7 +41,7 @@ struct auto_timer
 
 int main()
 {
-    // Set up some call option parameters
+	// Set up some call option parameters
 	// Example: ASX:BOQ May 30th
 	// Actual BOQWW7: 0.19
 	double S0 = 7.7;
@@ -51,6 +51,12 @@ int main()
 	double K = 7.51;
 	double s_min = 0.0, s_max = 50.0;
 
-    CallExample option(T, r, K, sigma);
+	CallExample option(T, r, K, sigma);
 	printf("Price: %lf\n", option.UseFormula(S0));
+
+	auto p = BlackPDE(s_min, s_max, &option);
+
+	// TODO: Explicit, Implicit, Crank-Nicolson
+
+	return 0;
 }
