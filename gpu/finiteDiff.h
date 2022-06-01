@@ -5,55 +5,64 @@
 
 // Explicit time marching method
 template <typename REAL>
-__global__ void ExplicitMethod(REAL sigma, REAL Smax, REAL K, REAL T, REAL r, REAL* d_x, int imax, int jmax)
-{
+__global__ void ExplicitMethod(REAL S0, REAL sigma, REAL Smax, REAL K, REAL T, REAL r, REAL *d_x) {
+    constexpr int TIMESTEPS = 200;
     // TODO: Maybe pass it in so no magic numbers?
-	constexpr int steps = 1024;
-	// Set of warps
-	constexpr int subthreads = 32;
-	// subsize = steps/subthreads (essentially the rows)
-	constexpr int subsize = steps / subthreads;
+    constexpr int steps = 256;
     int t_id = threadIdx.x;
-	int b_id = blockIdx.x;
-    int curThread = t_id % subthreads;
+    int bdim = blockDim.x;
     REAL dS = Smax / (steps + 1);
     // TODO: Also pass this in
-	REAL dT = T / imax;
+    REAL dT = T / TIMESTEPS;
+    __shared__ REAL V_[steps + 2];
+    __shared__ REAL V_minus[steps + 2];
 
-    __shared__ double V_[steps + 2];
-	__shared__ double V_minus[steps + 2];
-	V_[t_id + 1] = d_x[t_id + 1];
-	__syncthreads();
-    // Main time marching (not parallel)
-    REAL S = (t_id + 1) * dS;
-    for (int i = imax; i > 0; --i)
+    int i = t_id + 1;
+    REAL S = i * dS;
+
+    // Pull it out instead of calc twice
+    REAL halfdT = (REAL)0.5 * dT;
+    // Sometimes referred to as 'lambda and gamma' (such as paper)
+    // Intermediate calculations that are used multiple times
+    REAL alpha = halfdT * sigma * sigma * S * S / (dS * dS);
+    // S / dS is technically just 'i' but it's not a race and will maintain readability
+    REAL beta = halfdT * r * S / dS;
+
+    REAL a = alpha - beta;
+    REAL b = (REAL)-2.0 * alpha - r*dT;
+    REAL c = alpha + beta;
+
+    V_[i] = max(S-K, 0.0);
+
+    // These need to be zeroed
+    if (t_id == 0)
     {
+        V_[0]      = 0.0;
+        V_[bdim+1] = 0.0;
+    }
+    __syncthreads();
+
+    // Time marching loop with two at once to improve performance (as per paper)
+    REAL Vtmp = V_[i];
+
+    for (int n = TIMESTEPS; n > 0; n -= 2)
+    {
+        // a * Vm n-1 + b * Vm n + c ** Vm n+1
+        Vtmp  = Vtmp + a*V_[i-1] + b*Vtmp + c*V_[i+1];
+        V_minus[i] = Vtmp;
+        // Ensure we are ready for next one
         __syncthreads();
-        // Payouts (0 for bottom)
-        if (threadIdx.x == 0)
-	    {
-	    	V_minus[0] = 0.0;
-            // steps is jmax for now
-	    	V_minus[jmax] = ((Smax - K) * exp(-r * dT * i));
-	    }
-		// Pull it out instead of calc twice
-		REAL halfdT = (REAL)0.5 * dT;
-		REAL alpha = halfdT * sigma * sigma * S * S / (dS * dS);
-		REAL beta = halfdT * r * S / dS;
-		REAL a = -alpha + beta;
-		REAL b = 1.0f + 2 * alpha + r * dT;
-		REAL c = -alpha - beta;
-        //REAL a = dt*(b(i,j)*0.5-a(i,j)/ds)/ds;
-        //REAL b = 1.0-dt*c(i,j)+2.0*dt*a(i,j)/(ds*ds);
-        //REAL c = -dt*(b(i,j)*0.5+a(i,j)/ds)/ds;
-        // d term is 0
-        V_minus[t_id + 1] = a * V_[t_id] + b * V_[t_id + 1] + c*V_[t_id + 2];
-        __syncthreads();
-        V_[t_id + 1] = V_minus[t_id + 1];
+        Vtmp  = Vtmp + a*V_minus[i-1] + b*Vtmp + c*V_minus[i+1];
+        V_[i]  = Vtmp;
         __syncthreads();
     }
 
-    d_x[t_id + 1] = V_[t_id + 1];
+    // Average of two for output
+    if (t_id == 0)
+    {
+      size_t idx = (size_t)((blockDim.x * S0) / Smax);
+      d_x[blockIdx.x] = 0.5f*(V_[idx] + V_[idx + 1]);
+    }
 }
 
 // Implicit Method of Black-Scholes. Using PCR+Thomas by shuffle to solve tri-diagonal system

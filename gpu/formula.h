@@ -32,7 +32,6 @@ __device__ inline void UseFormulaGPU(double& result, double T, double S0, double
 
 __global__ void UseFormula(double* result, double T, double S0, double r, double K, double sigma) {
 	const int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	const int THREAD_N = blockDim.x * gridDim.x;
     // This isn't parallel because only one option
     // Typically this would be on CPU
     if (tid == 0)

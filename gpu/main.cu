@@ -10,7 +10,7 @@
 int main()
 {
 	// European calls to price, multiples of block size
-	const int num_options = 1024;
+	constexpr int num_options = 1024;
 	int num_dissteps;
 	int num_blocks;
 	int num_threads;
@@ -26,7 +26,8 @@ int main()
 	double r = 0.04;
 	double T = 16.0 / 365;
 	double K = 7.51;
-	double Smax = 50.0f;
+    // Explicit test assumes/prefers this relation
+	double Smax = S0 * 2;
 
 	constexpr unsigned TIMESTEPS = 200;
 
@@ -50,18 +51,21 @@ int main()
 
     // Perform explicit time-marching
     {
-        printf("Explicit, single-precision\n");
-        num_dissteps = 1024;
-        num_blocks = 1;
-        num_threads = num_dissteps - 1;
+        printf("Explicit, double-precision, discretise S in to 258 slices, timesteps = 200\n");
+        num_dissteps = 256;
+        num_blocks = num_options;
+        num_threads = num_dissteps;
 
         // Not parallel in time
-        int memsize = (num_dissteps + 1) * sizeof(double);
+        double x_in[num_options];
+
+        int memsize = num_options * sizeof(double);
 		double* d_x;
 		checkCudaErrors(cudaMalloc((void**)&d_x, memsize));
+        cudaMemcpy(d_x, &x_in, sizeof(x_in), cudaMemcpyHostToDevice);
 
         cudaEventRecord(start);
-        ExplicitMethod<<<num_blocks, num_threads>>>(sigma, Smax, K, T, r, d_x, TIMESTEPS, num_dissteps);
+        ExplicitMethod<<<num_blocks, num_threads>>>(S0, sigma, Smax, K, T, r, d_x);
         double* x = (double*)malloc(memsize);
 		checkCudaErrors(cudaMemcpy(x, d_x, memsize, cudaMemcpyDeviceToHost));
 
@@ -70,10 +74,9 @@ int main()
 		float millisecondsElapsed;
 		cudaEventElapsedTime(&millisecondsElapsed, start, stop);
 
-        // Get price by interpolation method
-        double ds = Smax / (num_dissteps + 1);
-        printf("Using Explicit method when spot price is %lf: %lf\n", S0, getPrice(S0, ds, x + 1));
-        printf("Consumed %f ms\n", millisecondsElapsed);
+        // We already return direct price inside ExplicitMethod
+        printf("Using Explicit method when spot price is %lf: %lf\n", S0, x[0]);
+        printf("Consumed %f ms\n", millisecondsElapsed / num_options);
 
         cudaFree(d_x);
         free(x);
